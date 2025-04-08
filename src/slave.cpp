@@ -19,7 +19,7 @@ Boot slave(1, [](Executor* executor) {
   });
 
   oneBusSlave.onRequest([](OneBusReadData * read, Responder * responder) {
-    Serial.print("Slave Получены данные: ");
+    Serial.print("Slave request data: ");
     for (int i = 0; i < read->length; i++) {
       Serial.print(read->data[i], HEX);
     }
