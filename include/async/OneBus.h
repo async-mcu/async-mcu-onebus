@@ -1,5 +1,6 @@
 #pragma once
 
+#include <async/Pin.h>
 #include <async/Log.h>
 #include <async/Tick.h>
 #include <async/Chain.h>
@@ -54,7 +55,7 @@ namespace async {
             volatile bool busyWrite;
             volatile bool busyRead;
             int timeSlot;
-            int pin;
+            Pin * pin;
             int writes;
             uint8_t byteRead;
             uint8_t receive[8];
@@ -64,16 +65,19 @@ namespace async {
             uint8_t readBitsInBuffer;// Количество битов в буфере (0-7)
 
             void setBusLow() {
-                pinMode(pin, OUTPUT);
-                digitalWrite(pin, LOW);
+                pin->digitalWrite(LOW);
             }
 
             void setBusHigh() {
-                pinMode(pin, INPUT_PULLUP);
+                pin->digitalWrite(HIGH);
+            }
+
+            void setBusRead() {
+                pin->setMode(INPUT_PULLUP);
             }
         
         public: 
-            OneBus(int pin, int timeSlot = 60): 
+            OneBus(Pin * pin, int timeSlot = 60): 
                 pin(pin), 
                 isMaster(false),
                 timeSlot(timeSlot),
@@ -92,8 +96,10 @@ namespace async {
                 readByteArray(nullptr), 
                 readByteCount(0), 
                 readBitBuffer(0), 
-                readBitsInBuffer(0) {
-                    setBusHigh();
+                readBitsInBuffer(0) { }
+
+            bool start() override {
+                    setBusRead();
 
                     // reader
                     executor.add(chain<uint32_t>(0)
@@ -107,8 +113,9 @@ namespace async {
                             
                             return (uint32_t)millis(); 
                         })
-                        ->interrupt(pin, RISING, timeSlot * 10) // wait for high
-                        ->then([this, timeSlot](uint32_t time) {
+                        ->interrupt(pin, RISING) // wait for high
+                        ->then([this](uint32_t time) {
+
                             if(busyWrite) {
                                 return time;
                             }
@@ -127,7 +134,7 @@ namespace async {
                             // read end command
                             else if(interval >= timeSlot * 4 - halfSlot && interval < timeSlot * 4 + halfSlot) {
                                 uint8_t* result = readByteArray;
-                                //Serial.println("read end");
+                                Serial.println("read end");
 
                                 OneBusReadData data({0, readByteArray, readByteCount});
 
@@ -155,13 +162,13 @@ namespace async {
                             }
                             // read 0 bit
                             else if(interval >= timeSlot * 2 - halfSlot && interval < timeSlot * 2 + halfSlot) {
-                                //S/erial.println("read 0 bit");
+                                //Serial.println("read 0 bit");
                                 readBitBuffer = (readBitBuffer << 1) | (false & 1);
                                 readBitsInBuffer++;
                             }
                             // read 1 bit
                             else if(interval >= timeSlot - halfSlot && interval < timeSlot + halfSlot) {
-                               //Serial.println("read 1 bit");
+                                //Serial.println("read 1 bit");
                                 readBitBuffer = (readBitBuffer << 1) | (true & 1);
                                 readBitsInBuffer++;
                             }
@@ -183,6 +190,8 @@ namespace async {
                             return time;
                         })
                         ->loop());
+
+                    return true;
                 }
 
             void begin(bool isMaster) {
@@ -205,7 +214,7 @@ namespace async {
 
                 // write start command
                 executor.add(chain()
-                    ->semaphore(&semaphoreWrite)
+                    ->semaphoreWaitAcquire(&semaphoreWrite)
                     ->delay(timeSlot)
                     ->then([this]() {
                         setBusLow();
@@ -228,7 +237,7 @@ namespace async {
 
                         // is performed sequentially
                         executor.add(chain()
-                            ->semaphore(&semaphoreWrite)
+                            ->semaphoreWaitAcquire(&semaphoreWrite)
                             ->then([this, bit]() {
                                 setBusLow();
                             })
@@ -244,7 +253,7 @@ namespace async {
                 }
 
                 executor.add(chain()
-                    ->semaphore(&semaphoreWrite)
+                    ->semaphoreWaitAcquire(&semaphoreWrite)
                     ->then([this]() {
                         setBusLow();
                     })
@@ -256,6 +265,7 @@ namespace async {
                     ->then([this, callback]() {
                         semaphoreRead.release();
                         semaphoreWrite.release();
+                        setBusRead();
                         busyWrite = false;
                         callback();
                     }));
@@ -276,7 +286,7 @@ namespace async {
                     })
                     ->delay(timeSlot * 8)
                     ->then([this]() {
-                        setBusHigh();
+                        setBusRead();
                         busyWrite = false;
                     }));
 
