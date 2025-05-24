@@ -163,13 +163,13 @@ namespace async {
                             // read 0 bit
                             else if(interval >= timeSlot * 2 - halfSlot && interval < timeSlot * 2 + halfSlot) {
                                 //Serial.println("read 0 bit");
-                                readBitBuffer = (readBitBuffer << 1) | (false & 1);
+                                readBitBuffer =  (readBitBuffer >> 1) | ((false & 1) << 7);
                                 readBitsInBuffer++;
                             }
                             // read 1 bit
                             else if(interval >= timeSlot - halfSlot && interval < timeSlot + halfSlot) {
                                 //Serial.println("read 1 bit");
-                                readBitBuffer = (readBitBuffer << 1) | (true & 1);
+                                readBitBuffer =  (readBitBuffer >> 1) | ((true & 1) << 7);
                                 readBitsInBuffer++;
                             }
 
