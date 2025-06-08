@@ -52,8 +52,8 @@ namespace async {
             Semaphore semaphoreRead;
             Responder responder;
             bool isMaster;
-            volatile bool busyWrite;
-            volatile bool busyRead;
+            volatile bool busyWriteFlag;
+            volatile bool busyReadFlag;
             int timeSlot;
             Pin * pin;
             int writes;
@@ -81,8 +81,8 @@ namespace async {
                 pin(pin), 
                 isMaster(false),
                 timeSlot(timeSlot),
-                busyWrite(false),
-                busyRead(false),
+                busyWriteFlag(false),
+                busyReadFlag(false),
                 modeCallback(nullptr),
                 busScanCallback(nullptr),
                 txCallback(nullptr),
@@ -105,18 +105,18 @@ namespace async {
                     executor.add(chain<uint32_t>(0)
                         ->interrupt(pin, FALLING) // wait fo
                         ->then([this](uint32_t time) {  // set current time
-                            busyRead = true;
-
-                            if(busyWrite) {
+                            if(busyWriteFlag) {
                                 return time;
                             }
+
+                            busyReadFlag = true;
                             
                             return (uint32_t)millis(); 
                         })
-                        ->interrupt(pin, RISING) // wait for high
+                        ->interrupt(pin, RISING, timeSlot * 10) // wait for high
                         ->then([this](uint32_t time) {
 
-                            if(busyWrite) {
+                            if(busyWriteFlag) {
                                 return time;
                             }
 
@@ -125,16 +125,16 @@ namespace async {
                             int halfSlot = timeSlot/2;
 
                             if(interval > timeSlot * 8 + halfSlot) {
-                                //Serial.println("bad request");
+                                Serial.println("bad request");
                             }
                             else if(interval >= timeSlot * 8 - halfSlot && interval < timeSlot * 8 + halfSlot) {
-                                //Serial.println("read reset");
+                                Serial.println("read reset");
                                 resetCallback();
                             }
                             // read end command
                             else if(interval >= timeSlot * 4 - halfSlot && interval < timeSlot * 4 + halfSlot) {
                                 uint8_t* result = readByteArray;
-                                Serial.println("read end");
+                                //Serial.println("read end");
 
                                 OneBusReadData data({0, readByteArray, readByteCount});
 
@@ -186,7 +186,7 @@ namespace async {
                                 readBitsInBuffer = 0;
                             }
 
-                            busyRead = false;
+                            busyReadFlag = false;
                             return time;
                         })
                         ->loop());
@@ -202,14 +202,21 @@ namespace async {
             // void begin(uint16_t pollInterval, ModeDetectedCallback callback = nullptr) {
                 
             // }
+            bool busyRead() {
+                return busyReadFlag;
+            }
+
+            bool busyWrite() {
+                return busyWriteFlag;
+            }
 
             bool send(uint8_t * data, uint8_t length, SendCallback callback = nullptr) {
-                if(busyWrite) {
+                if(busyWriteFlag) {
                     return false;
                 }
 
                 writes = length * 8;
-                busyWrite = true;
+                busyWriteFlag = true;
                 semaphoreRead.acquire();
 
                 // write start command
@@ -266,7 +273,7 @@ namespace async {
                         semaphoreRead.release();
                         semaphoreWrite.release();
                         setBusRead();
-                        busyWrite = false;
+                        busyWriteFlag = false;
                         callback();
                     }));
 
@@ -274,11 +281,11 @@ namespace async {
             }
 
             bool reset() {
-                if(busyWrite) {
+                if(busyWriteFlag) {
                     return false;
                 }
 
-                busyWrite = true;
+                busyWriteFlag = true;
 
                 executor.add(chain()
                     ->then([this]() {
@@ -287,7 +294,7 @@ namespace async {
                     ->delay(timeSlot * 8)
                     ->then([this]() {
                         setBusRead();
-                        busyWrite = false;
+                        busyWriteFlag = false;
                     }));
 
                 return true;
